@@ -1,15 +1,12 @@
 package org.apache.cordova.estimote;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.nio.ByteBuffer;
-import java.nio.charset.Charset;
 
-import org.apache.cordova.CordovaWebView;
+import android.app.Activity;
+import android.content.Context;
 import org.apache.cordova.PluginResult;
 import org.apache.cordova.CordovaPlugin;
 import org.apache.cordova.CallbackContext;
-import org.apache.cordova.CordovaInterface;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -17,8 +14,6 @@ import org.json.JSONException;
 
 import android.util.Log;
 import android.os.Build;
-import android.os.Handler;
-import android.os.Message;
 import android.annotation.TargetApi;
 
 import com.estimote.sdk.Region;
@@ -27,127 +22,175 @@ import com.estimote.sdk.BeaconManager;
 
 @TargetApi(Build.VERSION_CODES.GINGERBREAD)
 public class EstimotePlugin extends CordovaPlugin 
-{	
+{
 
-	private static final String ESTIMOTE_PROXIMITY_UUID = "B9407F30-F5F8-466E-AFF9-25556B57FE6D";
-	private static final Region ALL_ESTIMOTE_BEACONS = new Region("regionId", ESTIMOTE_PROXIMITY_UUID, null, null);
-  
-	private static final String LOG_TAG					= "EstimotePlugin";
+    private static final String ESTIMOTE_PROXIMITY_UUID = "B9407F30-F5F8-466E-AFF9-25556B57FE6D";
+    private static final Region ALL_ESTIMOTE_BEACONS = new Region("regionId", ESTIMOTE_PROXIMITY_UUID, null, null);
+
+    private static final String LOG_TAG					= "EstimotePlugin";
 	
-	private static final String ACTION_START_RANGING	= "startRanging";
+	private static final String ACTION_START	= "start";
+    private static final String ACTION_STOP 	= "stop";
+
+    private BeaconManager beaconManager;
 
 	/**
 	 * Callback context for device ranging actions.
 	 */
 	private CallbackContext rangingCallback;
-	
-	/**
-	 * Is set to true when a ranging process is cancelled or a new one is started when
-	 * there is a ranging process still in progress (cancels the old one).
-	 */
-	private boolean wasRangingCancelled;
-	
-	
-	/**
-	 * Initialize the Plugin, Cordova handles this.
-	 * 
-	 * @param cordova	Used to get register Handler with the Context accessible from this interface 
-	 * @param view		Passed straight to super's initialization.
-	 */
-	public void initialize(CordovaInterface cordova, CordovaWebView view)
-	{
-		super.initialize(cordova, view);	
-		wasRangingCancelled = false;
-	}
 
+    public EstimotePlugin() {
+        this.beaconManager = null;
+    }
+
+	
 	/**
 	 * Executes the given action.
 	 * 
-	 * @param action		The action to execute.
-	 * @param args			Potential arguments.
-	 * @param callbackCtx	Babby call home.
+	 * @param action		    The action to execute.
+	 * @param args			    Potential arguments.
+	 * @param callbackContext	The callback context used when calling back into JavaScript.
 	 */
 	@Override
-	public boolean execute(String action, JSONArray args, CallbackContext callbackCtx)
-	{	
-		if(ACTION_START_RANGING.equals(action))
-		{
-			startRanging(args, callbackCtx);
-		}
-		else
-		{
-			Log.e(LOG_TAG, "Invalid Action[" + action + "]");
-			callbackCtx.sendPluginResult(new PluginResult(PluginResult.Status.INVALID_ACTION));
-		}
-		
-		return true;
-	}
-	
-	private void startRanging(JSONArray args, final CallbackContext callbackCtx)
+	public boolean execute(final String action, JSONArray args, final CallbackContext callbackContext)
 	{
-		Log.d(LOG_TAG, "startRanging-method called");
-		rangingCallback = callbackCtx;
-		try
-		{
-			final BeaconManager beaconManager = new BeaconManager(cordova.getActivity().getBaseContext());
-			beaconManager.setRangingListener(new BeaconManager.RangingListener() {
-				@Override
-				public void onBeaconsDiscovered(Region region, List<Beacon> beacons) {
-					Log.d(LOG_TAG, "Ranged beacons: " + beacons);
-					for(Beacon b: beacons) {
-						try {						
-							String name = b.getName();
-							String address = b.getMacAddress();
-							String proximityUUID = b.getProximityUUID();
-							JSONObject device = new JSONObject();
-							device.put("name", name);
-							device.put("address", address);
-							device.put("proximityUUID", proximityUUID);
-							
-							// Send one device at a time, keeping callback to be used again
-							if(rangingCallback != null) {
-								PluginResult result = new PluginResult(PluginResult.Status.OK, device);
-								result.setKeepCallback(true);
-								rangingCallback.sendPluginResult(result);
-							} else {
-								Log.e(LOG_TAG, "CallbackContext for discovery doesn't exist.");
-							}
-						} catch(JSONException e) {
-							if(rangingCallback != null) {
-								EstimotePlugin.this.error(rangingCallback,
-									e.getMessage(),
-									BluetoothError.ERR_UNKNOWN
-								);
-								rangingCallback = null;
-							}
-						}
-					}
-				}
-			});		
-			
-			beaconManager.connect(new BeaconManager.ServiceReadyCallback() {
-				@Override
-				public void onServiceReady() {
-					try {
-						beaconManager.startRanging(ALL_ESTIMOTE_BEACONS);
-						JSONObject event = new JSONObject();
-						event.put("event", "connected");						
-						PluginResult result = new PluginResult(PluginResult.Status.OK, event);
-						result.setKeepCallback(true);
-						rangingCallback.sendPluginResult(result);
-					} catch (Throwable e) {
-						Log.e(LOG_TAG, "Cannot start ranging", e);
-						EstimotePlugin.this.error(callbackCtx, "Cannot start ranging::" + e.getMessage(), BluetoothError.ERR_UNKNOWN);
-					}
-				}
-			});					
-		}
-		catch(Exception e)
-		{
-			this.error(callbackCtx, "Outer exception handler. " + e.getMessage(), BluetoothError.ERR_UNKNOWN);
-		}
+        if (action.equals("start")) {
+            if (this.rangingCallback != null) {
+                callbackContext.error( "Beacon listener already running.");
+                return true;
+            }
+
+            this.rangingCallback = callbackContext;
+
+            if (beaconManager == null) {
+
+                final Activity activity = this.cordova.getActivity();
+                final Context context = activity.getApplicationContext();
+                beaconManager = new BeaconManager(context);
+
+                beaconManager.setRangingListener(new BeaconManager.RangingListener() {
+                    @Override
+                    public void onBeaconsDiscovered(Region region, final List<Beacon> beacons) {
+                        Log.d(LOG_TAG, "Ranged beacons: " + beacons);
+                        for(Beacon b: beacons) {
+                            updateBeaconInfo(b);
+                        };
+                    }
+                });
+
+                cordova.getThreadPool().execute(new Runnable() {
+                    public void run() {
+                        if (!beaconManager.hasBluetooth()) {
+                            rangingCallback.error("Device does not have Bluetooth Low Energy");
+                        } else {
+                            connectToService();
+                        }
+                    }
+                });
+            }
+
+            // Don't return any result now, since status results will be sent when events come in from broadcast receiver
+            PluginResult pluginResult = new PluginResult(PluginResult.Status.NO_RESULT);
+            pluginResult.setKeepCallback(true);
+            callbackContext.sendPluginResult(pluginResult);
+
+            return true;
+        }
+
+        else if (action.equals("stop")) {
+            removeBeaconListener();
+            this.sendUpdate(new JSONObject(), false); // release status callback in JS side
+            this.rangingCallback = null;
+            callbackContext.success();
+            return true;
+        }
+
+        return false;
 	}
+
+    @Override
+    public void onDestroy() {
+        removeBeaconListener();
+    }
+
+    @Override
+    public void onReset() {
+        removeBeaconListener();
+    }
+
+    private void removeBeaconListener() {
+        if (this.beaconManager != null) {
+            try {
+                this.beaconManager.stopRanging(ALL_ESTIMOTE_BEACONS);
+                this.beaconManager.disconnect();
+                this.beaconManager = null;
+            } catch (Exception e) {
+                Log.e(LOG_TAG, "Error disconnecting beacon manager: " + e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * Creates a JSONObject with the current beacon information
+     *
+     * @param beacon the current beacon information
+     * @return a JSONObject containing the beacon status information
+     */
+    private JSONObject getBeaconInfo(Beacon beacon) {
+        JSONObject obj = new JSONObject();
+        try {
+            obj.put("name", beacon.getName());
+            obj.put("address", beacon.getMacAddress());
+            obj.put("proximityUUID", beacon.getProximityUUID());
+            obj.put("major", beacon.getMajor());
+            obj.put("minor", beacon.getMinor());
+            obj.put("measuredPower", beacon.getMeasuredPower());
+        } catch (JSONException e) {
+            Log.e(LOG_TAG, e.getMessage(), e);
+        }
+        return obj;
+    }
+
+    /**
+     * Updates the JavaScript side whenever a beacon is discovered
+     *
+     * @param beacon the current beacon information
+     * @return
+     */
+    private void updateBeaconInfo(Beacon beacon) {
+        sendUpdate(this.getBeaconInfo(beacon), true);
+    }
+
+    /**
+     * Create a new plugin result and send it back to JavaScript
+     *
+     */
+    private void sendUpdate(JSONObject info, boolean keepCallback) {
+        if (this.rangingCallback != null) {
+            PluginResult result = new PluginResult(PluginResult.Status.OK, info);
+            result.setKeepCallback(keepCallback);
+            this.rangingCallback.sendPluginResult(result);
+        }
+    }
+
+    private void connectToService() {
+        beaconManager.connect(new BeaconManager.ServiceReadyCallback() {
+            @Override
+            public void onServiceReady() {
+                try {
+                    beaconManager.startRanging(ALL_ESTIMOTE_BEACONS);
+                    JSONObject event = new JSONObject();
+                    event.put("event", "connected");
+                    sendUpdate(event, true);
+                } catch (Exception e) {
+                    Log.e(LOG_TAG, "Cannot start ranging", e);
+                    EstimotePlugin.this.error(rangingCallback, "Cannot start ranging::" + e.getMessage(), BluetoothError.ERR_UNKNOWN);
+                }
+            }
+        });
+    }
 	
+
 	/**
 	 * Send an error to given CallbackContext containing the error code and message.
 	 * 
