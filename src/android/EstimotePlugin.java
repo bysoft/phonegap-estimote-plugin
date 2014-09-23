@@ -25,7 +25,7 @@ public class EstimotePlugin extends CordovaPlugin
 {
 
     private static final String ESTIMOTE_PROXIMITY_UUID = "B9407F30-F5F8-466E-AFF9-25556B57FE6D";
-    private static final Region ALL_ESTIMOTE_BEACONS = new Region("regionId", ESTIMOTE_PROXIMITY_UUID, null, null);
+    private static final Region ALL_ESTIMOTE_BEACONS = new Region("regionId", null, null, null);
 
     private static final String LOG_TAG					= "EstimotePlugin";
 	
